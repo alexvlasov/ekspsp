@@ -2,9 +2,9 @@
 apiVersion: policy/v1beta1
 kind: PodSecurityPolicy
 metadata:
-  name: awsnode
+  name: autoscaler
   annotations:
-    kubernetes.io/description: 'psp to attach to aws-node'
+    kubernetes.io/description: 'psp to attach to autoscaler'
     seccomp.security.alpha.kubernetes.io/allowedProfileNames: 'docker/default,runtime/default'
     seccomp.security.alpha.kubernetes.io/defaultProfileName:  'runtime/default'
   labels:
@@ -12,23 +12,11 @@ metadata:
     eks.amazonaws.com/component: pod-security-policy
 spec:
   privileged: true
-  allowPrivilegeEscalation: true
-  allowedCapabilities:
-  - NET_ADMIN
+  allowPrivilegeEscalation: false
   volumes:
-  - 'configMap'
+  - 'projected'
   - 'secret'
-  - 'hostPath'
-  - 'emptyDir'
-  allowedHostPaths:
-  - pathPrefix: "/opt/cni/bin"
-  - pathPrefix: "/etc/cni/net.d"
-  - pathPrefix: "/var/log"
-  - pathPrefix: "/var/log/aws-routed-eni"
-  - pathPrefix: "/var/run/dockershim.sock"
-  - pathPrefix: "/run/xtables.lock"
-  - pathPrefix: "/var/run/aws-node"
-  hostNetwork: true
+  hostNetwork: false
   hostPorts:
   - min: 0
     max: 65535
@@ -47,7 +35,7 @@ spec:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: eks:podsecuritypolicy:awsnode
+  name: eks:podsecuritypolicy:autoscaler
   namespace: kube-system
   labels:
       kubernetes.io/cluster-service: "true"
@@ -56,7 +44,7 @@ rules:
 - apiGroups:
   - policy
   resourceNames:
-  - awsnode
+  - autoscaler
   resources:
   - podsecuritypolicies
   verbs:
@@ -65,18 +53,18 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: eks:podsecuritypolicy:awsnode
+  name: eks:podsecuritypolicy:autoscaler
   namespace: kube-system
   annotations:
-    kubernetes.io/description: 'Allow service account aws-node to use awsnode psp in kube-system namespace.'
+    kubernetes.io/description: 'Allow service account cluster-autoscaler to use autoscaler psp in kube-system namespace.'
   labels:
     kubernetes.io/cluster-service: "true"
     eks.amazonaws.com/component: pod-security-policy
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: eks:podsecuritypolicy:awsnode
+  name: eks:podsecuritypolicy:autoscaler
 subjects:
   - kind: ServiceAccount
-    name: aws-node
+    name: cluster-autoscaler
     namespace: kube-system
