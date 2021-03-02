@@ -7,13 +7,18 @@ metadata:
       seccomp.security.alpha.kubernetes.io/allowedProfileNames: 'docker/default,runtime/default'
       seccomp.security.alpha.kubernetes.io/defaultProfileName:  'runtime/default'
 spec:
-    privileged: false
+    privileged: true
     # Required to prevent escalations to root.
-    allowPrivilegeEscalation: false
+    allowPrivilegeEscalation: true
     # This is redundant with non-root + disallow privilege escalation,
     # but we can provide it for defense in depth.
-    requiredDropCapabilities:
-    - ALL
+    #- requiredDropCapabilities:
+    #- - ALL
+    # defaultAddCapabilities:
+    # - NET_BIND_SERVICE
+    allowedCapabilities:
+    # - NET_ADMIN
+    - NET_BIND_SERVICE
     # Allow core volume types.
     volumes:
     - 'configMap'
@@ -32,21 +37,24 @@ spec:
         max: 65535
     runAsUser:
       # Require the container to run without root privileges.
-      rule: 'MustRunAsNonRoot'
+      # rule: 'MustRunAsNonRoot'
+      rule: 'RunAsAny'
     seLinux:
       # This policy assumes the nodes are using AppArmor rather than SELinux.
       rule: 'RunAsAny'
     supplementalGroups:
+      # rule: 'RunAsAny'
       rule: 'MustRunAs'
       ranges:
         # Forbid adding the root group.
-        - min: 1
+        - min: 100
           max: 65535
     fsGroup:
+      # rule: 'RunAsAny'
       rule: 'MustRunAs'
       ranges:
         # Forbid adding the root group.
-        - min: 1
+        - min: 100
           max: 65535
     readOnlyRootFilesystem: true
 ---
@@ -72,7 +80,7 @@ kind: ClusterRoleBinding
 metadata:
   name: eks:podsecuritypolicy:restricted
   annotations:
-    kubernetes.io/description: 'Allow all authenticated users to create restricted pods.'
+    kubernetes.io/description: 'Allow to create restricted pods.'
   labels:
     kubernetes.io/cluster-service: "true"
     eks.amazonaws.com/component: pod-security-policy
@@ -83,5 +91,7 @@ roleRef:
 subjects:
   - kind: Group
     apiGroup: rbac.authorization.k8s.io
-    # name: system:authenticated
     name: system:serviceaccounts
+  - kind: Group
+    apiGroup: rbac.authorization.k8s.io
+    name: system:authenticated

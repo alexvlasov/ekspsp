@@ -1,11 +1,264 @@
-apiVersion: v1
-kind: Pod
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: test
+# spec:
+#   containers:
+#     - name: test
+#       # run as user 0
+#       image: docker.io/ironcore864/go-hello-http:root
+#       # run as user 1000
+#       # image: docker.io/ironcore864/go-hello-http:latest
+
+kind: Ingress
+apiVersion: extensions/v1beta1
 metadata:
-  name: test
+  name: internal-test
+  namespace: default
+  labels:
+    environment: production
+    external: 'false'
+    name: test
+    productPodName: Test
+    version: 1.0.0
+  annotations:
+    ingressclasses.networking.k8s.io: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: 'false'
 spec:
-  containers:
-    - name: test
-      # run as user 0
-      image: docker.io/ironcore864/go-hello-http:root
-      # run as user 1000
-      # image: docker.io/ironcore864/go-hello-http:latest
+  backend:
+    serviceName: nginx
+    servicePort: 8080
+  rules:
+    - host: test.apps.samples.mss.namecheap.net
+      http:
+        paths:
+          - pathType: ImplementationSpecific
+            backend:
+              serviceName: nginx
+              servicePort: 8080
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-conf
+data:
+  nginx.conf: |
+    user  nginx;
+    worker_processes  1;
+
+    error_log  /tmp/error.log warn;
+    pid        /tmp/nginx.pid;
+
+
+    events {
+        worker_connections  1024;
+    }
+
+
+    http {
+        # include       /etc/nginx/mime.types;
+        default_type  application/octet-stream;
+
+        log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                          '$status $body_bytes_sent "$http_referer" '
+                          '"$http_user_agent" "$http_x_forwarded_for"';
+
+        access_log  /var/log/nginx/access.log  main;
+
+        # Temporary directories for kubernetes "readonlyfilesystem"
+        client_body_temp_path /tmp/nginx-client-body;
+        proxy_temp_path       /tmp/nginx-proxy;
+        fastcgi_temp_path     /tmp/nginx-fastcgi;
+        uwsgi_temp_path       /tmp/nginx-uwsgi;
+        scgi_temp_path        /tmp/nginx-scgi;
+
+        sendfile        on;
+        #tcp_nopush     on;
+
+        keepalive_timeout  65;
+
+        #gzip  on;
+
+        include /etc/nginx/conf.d/*.conf;
+
+    }
+  default.conf: |
+    server {
+        listen       80;
+        listen  [::]:80;
+        server_name  localhost;
+
+        #charset utf-8;
+        #access_log  /var/log/nginx/host.access.log  main;
+
+        location / {
+            root   /usr/share/nginx/html;
+            index  index.html index.htm;
+        }
+
+        #error_page  404              /404.html;
+
+        # redirect server error pages to the static page /50x.html
+        #
+        error_page   500 502 503 504  /50x.html;
+        location = /50x.html {
+            root   /usr/share/nginx/html;
+        }
+
+        # proxy the PHP scripts to Apache listening on 127.0.0.1:80
+        #
+        #location ~ \.php$ {
+        #    proxy_pass   http://127.0.0.1;
+        #}
+
+        # pass the PHP scripts to FastCGI server listening on 127.0.0.1:9000
+        #
+        #location ~ \.php$ {
+        #    root           html;
+        #    fastcgi_pass   127.0.0.1:9000;
+        #    fastcgi_index  index.php;
+        #    fastcgi_param  SCRIPT_FILENAME  /scripts$fastcgi_script_name;
+        #    include        fastcgi_params;
+        #}
+
+        # deny access to .htaccess files, if Apache's document root
+        # concurs with nginx's one
+        #
+        #location ~ /\.ht {
+        #    deny  all;
+        #}
+    }
+---
+
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: nginx-deployment
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      serviceAccountName: nginx-deployment
+      automountServiceAccountToken: true
+      containers:
+        - name: nginx
+          image: 'nginx:1.19.2'
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          resources: {}
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+          - name: tmp-volume
+            mountPath: /tmp
+            # readOnly: false
+          - name: nginx-conf
+            mountPath: /etc/nginx # mount nginx-conf volumn to /etc/nginx
+            readOnly: true
+          - name: entrypoint
+            mountPath: /docker-entrypoint.d
+          # securityContext:
+          #   capabilities:
+          #     add:
+          #      - NET_ADMIN
+          #      - NET_BIND_SERVICE
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      # securityContext:
+      #   runAsUser: 65534
+      #   fsGroup: 65534
+      volumes:
+      - name: token-vol
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: token
+      - name: tmp-volume
+        emptyDir: {}
+      - name: nginx-conf
+        configMap:
+          name: nginx-conf # place ConfigMap `nginx-conf` on /etc/nginx
+          items:
+            - key: nginx.conf
+              path: nginx.conf
+            - key: default.conf
+              path: conf.d/default.conf
+      - name: entrypoint
+        emptyDir: {}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 600
+# ---
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: test-pod
+# spec:
+#   containers:
+#   - image: ubuntu
+#     name: test-container
+#     command: [ "/bin/bash" ]
+#     args: [ "-c", "id; touch /tmp/test-file; ls -l /tmp" ]
+#     securityContext:
+#       runAsUser: 1000
+#       readOnlyRootFilesystem: true
+#     volumeMounts:
+#     - name: tmp-volume
+#       mountPath: /tmp
+#   restartPolicy: Never
+#   volumes:
+#     - name: tmp-volume
+#       emptyDir: {}
+---
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  name: nginx-deployment
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nginx-deployment
+  namespace: default
+  labels:
+    kubernetes.io/cluster-service: "true"
+    eks.amazonaws.com/component: pod-security-policy
+rules:
+- apiGroups:
+  - policy
+  resourceNames:
+  - restricted
+  resources:
+  - podsecuritypolicies
+  verbs:
+  - use
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nginx-deployment
+  namespace: default
+  labels:
+    kubernetes.io/cluster-service: "true"
+    eks.amazonaws.com/component: pod-security-policy
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nginx-deployment
+subjects:
+  - kind: ServiceAccount
+    name: nginx-deployment
+    namespace: default
